@@ -1,23 +1,42 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
 import glob
+import numpy_financial as npf
 from windrose import WindroseAxes
 
 st.set_page_config(layout="wide")
 
-st.title("Wind Resource & Energy Dashboard")
+st.markdown("""
+    <style>
+        .block-container {
+            padding-top: 0.5rem;
+        }
+    </style>
+""", unsafe_allow_html=True)
+st.markdown("""
+<style>
+div[data-baseweb="tab-list"] {
+    display: flex;
+    justify-content: space-between;
+    width: 100%;
+}
+</style>
+""", unsafe_allow_html=True)
+
+st.title("Wind Farm Design & Energy Analysis Tool")
 
 # ---------------------------------------------------------
-# CONTROLS (TOP)
+# CONTROLS
 # ---------------------------------------------------------
 
 turbines = {
-    "Vestas V164 8MW": {"rated_power":8000,"cut_in":3,"rated_speed":12,"cut_out":25,"rotor_diameter":164},
-    "Vestas V150 6MW": {"rated_power":6000,"cut_in":3,"rated_speed":11.5,"cut_out":25,"rotor_diameter":150},
-    "Siemens SG 6.0-154": {"rated_power":6000,"cut_in":3,"rated_speed":12,"cut_out":25,"rotor_diameter":154},
-    "Nordex N149 5MW": {"rated_power":5000,"cut_in":3,"rated_speed":11.5,"cut_out":25,"rotor_diameter":149},
-    "GE Haliade-X 12MW": {"rated_power":12000,"cut_in":3,"rated_speed":11,"cut_out":25,"rotor_diameter":220}
+    "Vestas V164 8MW": {"rated_power":8000,"cut_in":3,"rated_speed":12,"cut_out":25,"rotor_diameter":164, "hub_height":150},
+    "Vestas V150 6MW": {"rated_power":6000,"cut_in":3,"rated_speed":11.5,"cut_out":25,"rotor_diameter":150, "hub_height":120},
+    "Siemens SG 6.0-154": {"rated_power":6000,"cut_in":3,"rated_speed":12,"cut_out":25,"rotor_diameter":154, "hub_height":150},
+    "Nordex N149 5MW": {"rated_power":5000,"cut_in":3,"rated_speed":11.5,"cut_out":25,"rotor_diameter":149, "hub_height":125},
+    "GE Haliade-X 12MW": {"rated_power":12000,"cut_in":3,"rated_speed":11,"cut_out":25,"rotor_diameter":220, "hub_height":150}
 }
 
 heights = [98,123,148,173,198,218,248]
@@ -26,6 +45,8 @@ c1, c2 = st.columns(2)
 
 with c1:
     turbine_name = st.selectbox("Choose a wind turbine model:", list(turbines.keys()))
+    # store selected turbine in session_state for later tabs
+    st.session_state["selected_turbine"] = turbine_name
 
 with c2:
     height = st.selectbox("Choose measurement height (m):", heights)
@@ -38,10 +59,17 @@ rotor_diameter = turbine["rotor_diameter"]
 # ---------------------------------------------------------
 
 files = glob.glob("*.csv")
+
 df_list = []
 
 for file in files:
+    # Try comma first
     df_temp = pd.read_csv(file, low_memory=False)
+    
+    # If only one column, it's probably semicolon-delimited
+    if df_temp.shape[1] == 1:
+        df_temp = pd.read_csv(file, sep=";", low_memory=False)
+    
     df_list.append(df_temp)
 
 df = pd.concat(df_list, ignore_index=True)
@@ -57,6 +85,9 @@ df = df.set_index("time")
 df = df.resample("10T").mean()
 df = df.reset_index()
 
+# keep a copy with all height columns for later (turbine comparison)
+df_full = df.copy()
+
 # ---------------------------------------------------------
 # SELECT HEIGHT
 # ---------------------------------------------------------
@@ -69,7 +100,7 @@ df["direction"] = pd.to_numeric(df[direction_column], errors="coerce")
 
 df = df.dropna(subset=["wind","direction"])
 
-df.loc[df["wind"] > 100, "wind"] = None
+df.loc[df["wind"] > 100, "wind"] = np.nan
 df = df.dropna(subset=["wind"])
 
 # ---------------------------------------------------------
@@ -88,9 +119,13 @@ start_date, end_date = st.sidebar.date_input(
     max_value=max_date
 )
 
-# Apply filter
+# Apply filter to main df
 df = df[(df["time"] >= pd.to_datetime(start_date)) & 
         (df["time"] <= pd.to_datetime(end_date))]
+
+# Apply same filter to df_full for later use (turbine comparison)
+df_full = df_full[(df_full["time"] >= pd.to_datetime(start_date)) &
+                  (df_full["time"] <= pd.to_datetime(end_date))]
 
 # ---------------------------------------------------------
 # CALCULATIONS
@@ -126,7 +161,7 @@ df["power_kw"] = df["wind"].apply(lambda v: turbine_power(v, turbine))
 time_hours = 10 / 60
 df["energy_kwh"] = df["power_kw"] * time_hours
 
-total_energy = df["energy_kwh"].sum() / 1000
+total_energy = df["energy_kwh"].sum() / 1000  # MWh
 
 hours_measured = len(df) * time_hours
 annual_energy = total_energy * (8760 / hours_measured)
@@ -138,19 +173,19 @@ df["year_month"] = df["time"].dt.to_period("M")
 monthly_avg = df.groupby("year_month")["wind"].mean()
 monthly_energy = df.groupby("year_month")["energy_kwh"].sum() / 1000
 
-
 # ---------------------------------------------------------
 # TABS
 # ---------------------------------------------------------
 
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
     "Overview",
     "Monthly Analysis",
     "Wind Distribution",
-    "Turbine Direction",
+    "Wind Direction",
     "Turbine Performance",
+    "Turbine Comparison",
     "Wind Farm Design",
-    "Financial Analysis"
+    "Energy Yield Assessment"
 ])
 
 # ---------------------------------------------------------
@@ -161,7 +196,6 @@ with tab1:
 
     col1, col2 = st.columns([1,2])
 
-    # LEFT SIDE → TEXT + METRICS
     with col1:
         st.subheader("Overview")
 
@@ -172,6 +206,7 @@ with tab1:
         Key metrics include average wind speed, extreme values, 
         and estimated energy output using the selected turbine model.
         """)
+        st.info("Note: All energy results in this section are calculated for a single turbine. Annual energy is estimated from measured data and scaled to a full year.")
 
         st.markdown("### Key Results")
 
@@ -187,7 +222,6 @@ with tab1:
         - Capacity factor >40% → Very strong project potential  
         """)
 
-    # RIGHT SIDE → GRAPH
     with col2:
         fig, ax = plt.subplots(figsize=(6,3))
         ax.plot(df["time"], df["wind"])
@@ -198,7 +232,7 @@ with tab1:
 
         st.pyplot(fig)
 
- # ---------------------------------------------------------
+# ---------------------------------------------------------
 # TAB 2: MONTHLY ANALYSIS
 # ---------------------------------------------------------
 
@@ -216,6 +250,7 @@ with tab2:
         Seasonal variation is critical for estimating revenue stability 
         and grid integration.
         """)
+        st.info("Note: Monthly energy values represent production from one turbine only. Some months might contain incomplete datasets.")
 
         st.markdown("### Monthly Energy (MWh)")
 
@@ -279,6 +314,15 @@ with tab3:
 # ---------------------------------------------------------
 # TAB 4: WIND ROSE
 # ---------------------------------------------------------
+def deg_to_compass(deg):
+    directions = [
+        "N", "NNE", "NE", "ENE",
+        "E", "ESE", "SE", "SSE",
+        "S", "SSW", "SW", "WSW",
+        "W", "WNW", "NW", "NNW"
+    ]
+    idx = round(deg / 22.5) % 16
+    return directions[idx]
 
 with tab4:
 
@@ -293,24 +337,29 @@ with tab4:
         It is essential for turbine layout and orientation in a wind farm.
         """)
 
-        # Find dominant direction
-        dominant_dir = df["direction"].mean()
+        bins = np.arange(0, 361, 30)
+        df["dir_bin"] = pd.cut(df["direction"], bins, include_lowest=True)
+
+        dominant_bin = df["dir_bin"].value_counts().idxmax()
+        dominant_dir = dominant_bin.mid
+        compass_dir = deg_to_compass(dominant_dir)
 
         st.markdown(f"""
         **Key Insight:**
-        - Dominant wind direction: **~{dominant_dir:.0f}°**
+        - Dominant wind direction: ~{dominant_dir:.0f}° ({compass_dir})
         - Turbines should face this direction for maximum efficiency
         """)
 
         st.markdown("""
         **How to read:**
-        - Each “arm” = wind direction  
-        - Length = frequency  
-        - Colors = wind speed ranges  
+        - Each “arm” represents a wind direction  
+        - The length of each segment shows how frequently wind comes from that direction  
+        - Concentric circles indicate percentage frequency (how often wind occurs)  
+        - Colors represent different wind speed ranges  
         """)
-    
+
     with col2:
-        fig = plt.figure(figsize=(3.5,3.5))  # ✅ smaller figure
+        fig = plt.figure(figsize=(3.5,3.5))
 
         ax = WindroseAxes.from_ax(fig=fig)
 
@@ -318,25 +367,23 @@ with tab4:
             df["direction"],
             df["wind"],
             bins=[0,4,8,12,16,20,25],
-        normed=True,
-        opening=0.8,
+            normed=True,
+            opening=0.8,
             edgecolor='white'
         )
+        ax.set_rlabel_position(225)
 
         ax.set_title("Wind Rose", fontsize=10)
-
     
         ax.set_legend(
-            title="m/s",
+            title="Wind speed, m/s",
             fontsize=7,
             title_fontsize=8,
             loc="lower left",
-            bbox_to_anchor=(1.0, 0)
+            bbox_to_anchor=(1.0, -0.1)
         )
 
         st.pyplot(fig)
-
-
 
 # ---------------------------------------------------------
 # TAB 5: TURBINE PERFORMANCE
@@ -379,247 +426,447 @@ with tab5:
         st.pyplot(fig)
 
 # ---------------------------------------------------------
-# TAB 6: WIND FARM DESIGN
+# TAB 6: TURBINE COMPARISON
 # ---------------------------------------------------------
-
 with tab6:
 
-    col1, col2 = st.columns([1,2])
+    st.subheader("Turbine Comparison at Selected Site")
 
-    # ---------------- LEFT: INPUTS ----------------
+    st.write("""
+    This section compares different turbine models under the same wind conditions.
+
+    Each turbine is evaluated using wind data from the **measurement height closest to its hub height**, 
+    ensuring a more realistic representation of operating conditions.
+
+    The results show annual energy production and capacity factor for each turbine.
+    """)
+
+    col1, col2 = st.columns([1, 1.5])
+
+    results = []
+
+    for name, turb in turbines.items():
+
+        hub = turb["hub_height"]
+        selected_height = min(heights, key=lambda h: abs(h - hub))
+
+        wind_column_t = f"Horizontal Wind Speed (m/s) at {selected_height}m"
+
+        if wind_column_t not in df_full.columns:
+            continue
+
+        df_t = df_full[["time", wind_column_t]].copy()
+        df_t["wind"] = pd.to_numeric(df_t[wind_column_t], errors="coerce")
+        df_t = df_t.dropna(subset=["wind"])
+        df_t.loc[df_t["wind"] > 100, "wind"] = np.nan
+        df_t = df_t.dropna(subset=["wind"])
+
+        power = df_t["wind"].apply(lambda v: turbine_power(v, turb))
+        energy_kwh = power * (10 / 60)
+
+        total_energy_t = energy_kwh.sum() / 1000  # MWh
+        hours_measured_t = len(df_t) * (10 / 60)
+
+        if hours_measured_t == 0:
+            continue
+
+        annual_energy_t = total_energy_t * (8760 / hours_measured_t)
+
+        capacity_factor_t = (
+            energy_kwh.sum() / (turb["rated_power"] * hours_measured_t)
+        )
+
+        results.append({
+            "Turbine": name,
+            "Hub Height (m)": hub,
+            "Selected Wind Height (m)": selected_height,
+            "Annual Energy (MWh)": annual_energy_t,
+            "Capacity Factor (%)": capacity_factor_t * 100
+        })
+
+    results_df = pd.DataFrame(results)
+    
+
+    if not results_df.empty:
+        results_df = results_df.sort_values(
+            "Annual Energy (MWh)",
+            ascending=False
+        )
+
     with col1:
-        st.subheader("Wind Farm Layout")
 
-        num_turbines = st.slider("Number of turbines", 1, 200, 50)
-
-        spacing_downwind = st.slider(
-            "Downwind spacing (rotor diameters, D)",
-            3.0, 12.0, 7.0
-        )
-
-        spacing_crosswind = st.slider(
-            "Crosswind spacing (rotor diameters, D)",
-            3.0, 12.0, 5.0
-        )
-
-        spacing_downwind_m = spacing_downwind * rotor_diameter
-        spacing_crosswind_m = spacing_crosswind * rotor_diameter
-
-        st.markdown("### Spacing (meters)")
-        st.write(f"• Downwind: {spacing_downwind_m:.0f} m")
-        st.write(f"• Crosswind: {spacing_crosswind_m:.0f} m")
-
-    # Wake model
-    def wake_loss_factor(spacing_d):
-        if spacing_d < 4:
-            return 0.20
-        elif spacing_d < 6:
-            return 0.12
-        elif spacing_d < 8:
-            return 0.08
-        elif spacing_d < 10:
-            return 0.05
+        st.markdown("### Results Table")
+        
+        if results_df.empty:
+            st.write("No valid results to display (check data columns and time range).")
         else:
-            return 0.03
+            st.dataframe(results_df)
 
-    # Use downwind spacing (more important physically)
-    wake_loss = wake_loss_factor(spacing_downwind)
+            best = results_df.iloc[0]
 
-    st.markdown("### Wake Effects")
-    st.write(f"• Estimated wake loss: {wake_loss*100:.1f}%")
+            st.markdown("### Interpretation")
 
-    # Save for other tabs
-    st.session_state["num_turbines"] = num_turbines
-    st.session_state["wake_loss"] = wake_loss
-    st.session_state["spacing_downwind"] = spacing_downwind
-    st.session_state["spacing_crosswind"] = spacing_crosswind
+            st.write(f"""
+            The best performing turbine at this site is the **{best['Turbine']}**.
 
-    # -------------- LAYOUT VISUAL ----------------
+            It achieves the highest annual energy output due to:
+            - Better matching between hub height ({best['Hub Height (m)']} m) and available wind measurement height ({best['Selected Wind Height (m)']} m)
+            - Its rated power and power curve characteristics in the observed wind speed range
+
+            ### Key insight:
+            Turbines are sensitive to wind speed variations with height.
+            Even small differences in hub height can significantly affect energy yield.
+            """)
+
     with col2:
-        import numpy as np
 
+        if not results_df.empty:
+            fig, ax = plt.subplots(figsize=(4, 3))
 
-        # Dominant wind direction (already computed earlier)
-        wind_dir = df["direction"].mean()
-
-        # Convert to radians
-        theta = np.radians(wind_dir)
-
-        # Grid layout
-        cols = int(np.sqrt(num_turbines))
-        rows = int(np.ceil(num_turbines / cols))
-
-        x = []
-        y = []
-
-        for i in range(rows):
-            for j in range(cols):
-                if len(x) < num_turbines:
-                    x.append(j * spacing_crosswind_m)
-                    y.append(i * spacing_downwind_m)
-
-        x = np.array(x)
-        y = np.array(y)
-
-        # Rotate layout based on wind direction
-        x_rot = x * np.cos(theta) - y * np.sin(theta)
-        y_rot = x * np.sin(theta) + y * np.cos(theta)
-
-        # Create plot
-        fig, ax = plt.subplots(figsize=(6,6))
-
-        # Plot turbines
-        ax.scatter(x_rot, y_rot)
-
-        # Add arrows showing wind direction
-        arrow_length = rotor_diameter * 2
-
-        for xi, yi in zip(x_rot, y_rot):
-            ax.arrow(
-                xi, yi,
-                arrow_length * np.sin(theta),
-                arrow_length * np.cos(theta),
-                head_width=rotor_diameter * 0.3,
-                length_includes_head=True
+            ax.bar(
+                results_df["Turbine"],
+                results_df["Annual Energy (MWh)"]
             )
 
-        # Add cardinal directions
-        ax.text(0, arrow_length*3, "N", ha='center')
-        ax.text(arrow_length*3, 0, "E", va='center')
-        ax.text(0, -arrow_length*3, "S", ha='center')
-        ax.text(-arrow_length*3, 0, "W", va='center')
+            ax.set_title("Annual Energy Comparison")
+            ax.set_ylabel("MWh")
 
-        # Labels
-        ax.set_title("Wind Farm Layout & Orientation")
-        ax.set_xlabel("Distance (m)")
-        ax.set_ylabel("Distance (m)")
+            plt.xticks(rotation=45)
 
-        ax.set_aspect('equal')
+            st.pyplot(fig)
 
-
-        # Draw spacing example (first two turbines)
-        if len(x_rot) > 1:
-            ax.plot(
-                [x_rot[0], x_rot[1]],
-                [y_rot[0], y_rot[1]]
-            )
-
-            mid_x = (x_rot[0] + x_rot[1]) / 2
-            mid_y = (y_rot[0] + y_rot[1]) / 2
-
-            ax.text(mid_x, mid_y, f"{spacing_crosswind_m:.0f} m")
-
-        st.pyplot(fig)
+            st.caption("""
+            Energy output comparison across turbine models using height-adjusted wind data.
+            Each turbine uses the closest available measurement height to its hub height.
+            """)
+        else:
+            st.write("No comparison plot available (no valid turbine results).")
 
 # ---------------------------------------------------------
-# TAB 7: FINANCIAL ANALYSIS
+# TAB 7: WIND FARM DESIGN
 # ---------------------------------------------------------
-
 with tab7:
 
     col1, col2 = st.columns([1,2])
 
-    # ---------------- INPUTS ----------------
     with col1:
-        st.subheader("Financial Parameters")
+        st.subheader("Wind Farm Layout")
+        st.markdown("""
+        **Model assumptions:**
+        - Constant thrust coefficient (CT = 0.6)
+        - Linear wake expansion (Jensen wake model, simplified)
+        - Uniform offshore wind conditions
+        - Wake deficit capped to avoid unrealistic wind speed reductions
+        - No electrical or mechanical losses included
+        """)
 
-        electricity_price = st.number_input(
-            "Electricity price (€/MWh)", value=80.0
-        )
+        num_turbines = st.slider("Number of turbines", 1, 50, 20)
+        spacing_downwind = st.slider("Downwind spacing (D)", 3.0, 12.0, 7.0)
+        spacing_crosswind = st.slider("Crosswind spacing (D)", 3.0, 12.0, 5.0)
 
-        capex = st.number_input(
-            "CAPEX (€/MW installed)", value=3000000.0
-        )
+        # store in session_state for Tab 7
+        st.session_state["num_turbines"] = num_turbines
+        st.session_state["wake_loss"] = wake_loss_factor(spacing_downwind)
 
-        opex = st.number_input(
-            "OPEX (% of CAPEX per year)", value=3.0
-        )
+        spacing_downwind_m = spacing_downwind * rotor_diameter
+        spacing_crosswind_m = spacing_crosswind * rotor_diameter
 
-        lifetime = st.slider(
-            "Project lifetime (years)", 10, 30, 25
-        )
-
-        discount_rate = st.slider(
-            "Discount rate (%)", 1.0, 15.0, 7.0
-        ) / 100
+        st.markdown("### Spacing")
+        st.write(f"• Downwind: {spacing_downwind_m:.0f} m")
+        st.write(f"• Crosswind: {spacing_crosswind_m:.0f} m")
 
         st.markdown("---")
 
-        # Pull values from Wind Farm Design tab
-        num_turbines = st.session_state.get("num_turbines", 1)
-        wake_loss = st.session_state.get("wake_loss", 0.1)
+        show_wake_effect = st.checkbox(
+            "Highlight wake-affected turbines",
+            True
+        )
 
-        spacing_along = st.session_state.get("spacing_downwind", 7)
-        spacing_cross = st.session_state.get("spacing_crosswind", 5)
+        st.caption("Red circles indicate turbines significantly affected by wake effects.")
 
+        bins = np.arange(0, 361, 30)
+        df["dir_bin"] = pd.cut(df["direction"], bins, include_lowest=True)
+        dir_freq = df["dir_bin"].value_counts(normalize=True)
 
-    # ---------------- CALCULATIONS ----------------
-    adjusted_energy = annual_energy * (1 - wake_loss)
-    total_energy_farm = adjusted_energy * num_turbines
+        dominant_bin = dir_freq.idxmax()
+        wind_dir = dominant_bin.mid
+        theta = np.radians(wind_dir)
+    
+        st.markdown("### Wind Direction")
 
-    installed_capacity_mw = (turbine["rated_power"] / 1000) * num_turbines
+        fig_compass, ax_compass = plt.subplots(figsize=(1.2,1.2))
 
-    total_capex = capex * installed_capacity_mw
-    annual_revenue = total_energy_farm * electricity_price
-    annual_opex = total_capex * (opex / 100)
+        circle = plt.Circle((0,0), 0.8, fill=False, linewidth=0.6)
+        ax_compass.add_patch(circle)
 
-    annual_profit = annual_revenue - annual_opex
+        ax_compass.plot([0,0], [-0.8,0.8], color="gray", linewidth=0.5)
+        ax_compass.plot([-0.8,0.8], [0,0], color="gray", linewidth=0.5)
 
-    # NPV
-    npv = -total_capex
-    for year in range(1, lifetime + 1):
-        npv += annual_profit / ((1 + discount_rate) ** year)
+        ax_compass.text(0, 1, "N", ha='center', fontsize=6)
+        ax_compass.text(1, 0, "E", va='center', fontsize=6)
+        ax_compass.text(0, -1.2, "S", ha='center', fontsize=6)
+        ax_compass.text(-1.2, 0, "W", va='center', fontsize=6)
 
-    # Payback period
-    cumulative = 0
-    payback = None
-    for year in range(1, lifetime + 1):
-        cumulative += annual_profit
-        if cumulative >= total_capex and payback is None:
-            payback = year
+        ax_compass.arrow(
+            0, 0,
+            0.5*np.cos(theta),
+            0.5*np.sin(theta),
+            head_width=0.12,
+            color="black"
+        )
 
-    # ---------------- RESULTS ----------------
+        ax_compass.set_xlim(-1.2,1.2)
+        ax_compass.set_ylim(-1.2,1.2)
+        ax_compass.axis('off')
+
+        st.pyplot(fig_compass)
+
+        st.caption(
+            "Wind farm performance is evaluated by weighting turbine output across all wind directions based on their observed frequency."
+        )
+
     with col2:
-        st.subheader("Financial Results")
 
-        st.write(f"• Total CAPEX: **{total_capex:,.0f} €**")
-        st.write(f"• Annual revenue: **{annual_revenue:,.0f} €**")
-        st.write(f"• Annual OPEX: **{annual_opex:,.0f} €**")
-        st.write(f"• Annual profit: **{annual_profit:,.0f} €**")
+        cols = int(np.sqrt(num_turbines))
+        rows = int(np.ceil(num_turbines / cols))
 
-        st.markdown("### Key Metrics")
+        dw_vec = np.array([np.cos(theta), np.sin(theta)])
+        cw_vec = np.array([-np.sin(theta), np.cos(theta)])
 
-        st.write(f"• NPV: **{npv:,.0f} €**")
+        x, y = [], []
 
-        if payback:
-            st.write(f"• Payback period: **{payback} years**")
-        else:
-            st.write("• Payback period: Not reached")
+        for i in range(rows):
+            for j in range(cols):
+                if len(x) < num_turbines:
 
-        st.markdown("""
-        **Interpretation:**
-        - Positive NPV → project is profitable  
-        - Payback < 15 years → strong investment  
+                    stagger = 0.5 * spacing_crosswind_m if i % 2 == 1 else 0
+
+                    pos = (
+                        i * spacing_downwind_m * dw_vec +
+                        (j * spacing_crosswind_m + stagger) * cw_vec
+                    )
+
+                    x.append(pos[0])
+                    y.append(pos[1])
+
+        x = np.array(x)
+        y = np.array(y)
+
+        x -= x.min()
+        y -= y.min()
+
+        CT = 0.6
+        k_wake = 0.075
+        R = rotor_diameter / 2
+
+        effective_wind_total = np.zeros(len(x))
+        total_weight = 0
+
+        for dir_bin, weight in dir_freq.items():
+
+            if weight == 0:
+                continue
+
+            theta_i = np.radians(dir_bin.mid)
+
+            dw_vec_i = np.array([np.cos(theta_i), np.sin(theta_i)])
+            cw_vec_i = np.array([-np.sin(theta_i), np.cos(theta_i)])
+
+            base_wind_i = df[df["dir_bin"] == dir_bin]["wind"].mean()
+
+            if np.isnan(base_wind_i):
+                continue
+
+            effective_wind_dir = np.full(len(x), base_wind_i)
+
+            for i in range(len(x)):
+
+                deficit_sq_sum = 0
+
+                for j in range(len(x)):
+                    if i == j:
+                        continue
+
+                    dx = x[i] - x[j]
+                    dy = y[i] - y[j]
+
+                    x_down = dx * dw_vec_i[0] + dy * dw_vec_i[1]
+                    y_cross = abs(dx * cw_vec_i[0] + dy * cw_vec_i[1])
+
+                    if x_down <= 0:
+                        continue
+
+                    wake_radius = R + k_wake * x_down
+
+                    if y_cross <= wake_radius:
+                        deficit = (1 - np.sqrt(1 - CT)) * (R / wake_radius) ** 2
+                        deficit_sq_sum += (0.7 * deficit) ** 2
+
+                total_deficit = min(np.sqrt(deficit_sq_sum), 0.6)
+                effective_wind_dir[i] = max(0, base_wind_i * (1 - total_deficit))
+
+            effective_wind_total += weight * effective_wind_dir
+            total_weight += weight
+
+        effective_wind = effective_wind_total / max(total_weight, 1e-6)
+
+        norm = (effective_wind - effective_wind.min()) / (
+            effective_wind.max() - effective_wind.min() + 1e-6
+        )
+
+        fig, ax = plt.subplots(figsize=(4,4))
+
+        scatter = ax.scatter(
+            x, y,
+            c=norm,
+            cmap="viridis",
+            s=30
+        )
+
+        threshold = np.percentile(effective_wind, 25)
+        affected_count = np.sum(effective_wind < threshold)
+
+        if show_wake_effect:
+            for xi, yi, w in zip(x, y, effective_wind):
+                if w < threshold:
+                    ax.scatter(xi, yi, edgecolor='red', facecolor='none', s=70, linewidth=1)
+
+        arrow_length = rotor_diameter * 1.2
+
+        for xi, yi in zip(x, y):
+            ax.arrow(
+                xi, yi,
+                -arrow_length * dw_vec[0],
+                -arrow_length * dw_vec[1],
+                head_width=rotor_diameter * 0.2,
+                color="black",
+                alpha=0.5
+            )
+
+        cbar = plt.colorbar(scatter, ax=ax)
+        cbar.set_label("Effective wind speed", fontsize=8)
+        cbar.ax.tick_params(labelsize=7)
+
+        ax.set_xlabel("Distance (m)", fontsize=8)
+        ax.set_ylabel("Distance (m)", fontsize=8)
+        ax.tick_params(labelsize=7)
+        ax.set_aspect('equal')
+
+        st.pyplot(fig)
+
+        avg_all = np.mean(effective_wind)
+        avg_wake = np.mean(effective_wind[effective_wind < threshold]) if affected_count > 0 else avg_all
+        loss_percent = (1 - avg_wake / avg_all) * 100 if avg_all > 0 else 0
+
+        st.markdown(
+            f"In this layout, {affected_count} out of {num_turbines} turbines are significantly affected by wake effects, "
+            f"with an average wind speed reduction of {loss_percent:.1f}%."
+        )
+        st.caption(
+            "Wake losses occur when downstream turbines operate in reduced wind speeds caused by upstream turbines."
+        )
+
+# ---------------------------------------------------------
+# TAB 8: ENERGY YIELD & UNCERTAINTY (P50 / P75 / P90)
+# ---------------------------------------------------------
+
+with tab8:
+
+    from scipy.stats import norm
+
+    col1, col2 = st.columns([1,2])
+
+    with col1:
+        st.subheader("Energy Yield Assessment")
+
+        num_turbines = st.session_state.get("num_turbines", 20)
+        wake_loss = st.session_state.get("wake_loss", 0.1)
+        turbine_name = st.session_state.get("selected_turbine", "Vestas V164 8MW")
+
+        uncertainty = st.slider(
+            "Total uncertainty (%)",
+            5, 15, 10
+        ) / 100
+
+        energy_per_turbine = annual_energy  # MWh/year
+
+        total_energy_farm = energy_per_turbine * num_turbines * (1 - wake_loss)
+
+        energy_p50 = total_energy_farm
+        energy_p75 = energy_p50 * (1 - 0.5 * uncertainty)
+        energy_p90 = energy_p50 * (1 - uncertainty)
+
+        st.markdown("### Wind Farm Production")
+
+        st.write(f"• Turbine model: **{turbine_name}**")
+        st.write(f"• Number of turbines: **{num_turbines}**")
+        st.write(f"• Wake loss applied: **{wake_loss*100:.1f}%**")
+
+        st.markdown("### Energy Yield Estimates")
+
+        st.write(f"• P50 (expected): **{energy_p50:,.0f} MWh/year**")
+        st.write(f"• P75: **{energy_p75:,.0f} MWh/year**")
+        st.write(f"• P90: **{energy_p90:,.0f} MWh/year**")
+
+        st.markdown("### Accuracy & Methodology")
+
+        st.info("""
+        These P50, P75, and P90 values are simplified estimates based on measured wind data 
+        and an assumed total uncertainty range.
+
+        **Accuracy level:**
+        - Suitable for early-stage assessment (screening / concept level)
+        - Not suitable for investment-grade (bankable) decisions
+
+        This model does NOT include several critical components required for accurate yield prediction:
+        
+        • Long-term wind climate correction (MCP analysis)  
+        • Interannual wind variability (multi-year reference data)  
+        • Detailed wake modeling across the full wind farm layout  
+        • Turbine availability and operational downtime  
+        • Electrical and grid losses  
+        • Environmental effects (icing, degradation, curtailment)  
+
+        Therefore, results here should be interpreted as indicative, not definitive.
         """)
 
-    # ---------------- EXPLANATION ----------------
-    st.markdown("---")
+    with col2:
+        
+        mean = energy_p50
+        std_dev = mean * uncertainty
 
-    with st.expander("INFO - Financial Terms Explained"):
+        x_vals = np.linspace(mean * 0.7, mean * 1.2, 200)
+        y_vals = norm.pdf(x_vals, mean, std_dev)
+
+        fig, ax = plt.subplots(figsize=(6,4))
+
+        ax.plot(x_vals, y_vals)
+
+        ax.axvline(energy_p50, linestyle="-", linewidth=2, label="P50")
+        ax.axvline(energy_p75, linestyle="--", linewidth=2, label="P75")
+        ax.axvline(energy_p90, linestyle=":", linewidth=2, label="P90")
+
+        ax.set_xlabel("Annual Energy Production (MWh)")
+        ax.set_ylabel("Probability Density")
+        ax.set_title("Energy Yield Uncertainty")
+
+        ax.legend()
+
+        st.pyplot(fig)
+
         st.markdown("""
-        **NPV (Net Present Value)**  
-        Total value of the project over its lifetime, accounting for time and risk.  
-        → Positive = good investment
+        **How to read this graph:**
 
-        **Discount rate**  
-        Reflects risk and the fact that money today is worth more than future money
+        - The curve represents possible annual energy outcomes based on uncertainty  
+        - **P50** is the expected (most likely) production  
+        - **P75 and P90** represent increasingly conservative estimates  
 
-        **CAPEX**  
-        Initial cost to build the wind farm
+        **Uncertainty slider:**
+        - Controls how “spread out” the possible outcomes are  
+        - Higher uncertainty → larger gap between P50 and P90  
+        - Typical offshore projects range between **8–12% uncertainty**  
 
-        **OPEX**  
-        Yearly cost of maintenance and operation
-
-        **Payback period**  
-        Time needed to recover the initial investment
+        This simplified model assumes a normal distribution of wind variability 
+        and does not include full long-term corrections.
         """)
+
