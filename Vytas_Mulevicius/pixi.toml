@@ -1,0 +1,31 @@
+[workspace]
+authors = ["VytasMule <vytasmulevicius@gmail.com>"]
+channels = ["conda-forge"]
+name = "lhcb-task"
+platforms = ["linux-64"]
+version = "0.1.0"
+
+[tasks]
+
+[dependencies]
+python = "3.11.*"
+uproot = ">=5.7.3,<6"
+awkward = ">=2.9.0,<3"
+numpy = ">=2.4.2,<3"
+altair = "<5.0"
+pandas = "<3.0"
+matplotlib = ">=3.10.8,<4"
+polars = ">=1.0.0,<2"
+scipy = ">=1.11.0,<2"
+plotly = ">=5.10.0,<6"
+streamlit = ">=1.20.0,<2"
+requests = "*"
+aiohttp = "*"
+awkward-pandas = "*"
+pandas-datareader = ">=0.10.0,<0.11"
+xrootd = ">=5.9.2,<6"
+pytest = ">=8.0,<9"
+pydantic = ">=2.0,<3"
+
+[activation.env]
+PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION = "python"

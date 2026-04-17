@@ -1,0 +1,10 @@
+# Pixi files
+.pixi/
+pixi.lock
+
+# Ignore any opendata.cern.ch files
+*.csv
+*.dst
+*.root
+
+*.pyc
