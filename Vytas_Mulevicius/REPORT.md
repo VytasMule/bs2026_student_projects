@@ -1,5 +1,6 @@
 # ⚛️ Final Project Report: CERN Open Data Explorer
-**Module Project Report** | **Author**: Vytas Mulevicius
+**Module Project Report** | **Author**: Vytas Mulevicius  
+**Video Demo**: [Watch on Loom](https://www.loom.com/share/e12fc73e9792457eb3c1232111d3d91b)
 
 ---
 
