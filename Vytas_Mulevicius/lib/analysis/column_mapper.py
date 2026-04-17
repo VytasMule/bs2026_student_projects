@@ -1,6 +1,8 @@
 import streamlit as st
 import polars as pl
 
+_MUON_MASS_GEV = 0.105658
+
 
 def map_columns(df: pl.DataFrame) -> pl.DataFrame:
     """
@@ -43,14 +45,13 @@ def _map_lhcb(df: pl.DataFrame, cols: list[str]) -> pl.DataFrame:
         if 'muminus_PE' in cols:
             df = df.with_columns((pl.col('muminus_PE') / 1000.0).alias('E2'))
 
-        m_mu = 0.105658
         if 'E1' not in df.columns:
             df = df.with_columns(
-                ((pl.col('px1')**2 + pl.col('py1')**2 + pl.col('pz1')**2 + m_mu**2).sqrt()).alias('E1')
+                ((pl.col('px1')**2 + pl.col('py1')**2 + pl.col('pz1')**2 + _MUON_MASS_GEV**2).sqrt()).alias('E1')
             )
         if 'E2' not in df.columns:
             df = df.with_columns(
-                ((pl.col('px2')**2 + pl.col('py2')**2 + pl.col('pz2')**2 + m_mu**2).sqrt()).alias('E2')
+                ((pl.col('px2')**2 + pl.col('py2')**2 + pl.col('pz2')**2 + _MUON_MASS_GEV**2).sqrt()).alias('E2')
             )
 
         if 'eta1' not in df.columns:
@@ -163,45 +164,35 @@ def _map_cms(df: pl.DataFrame, cols: list[str]) -> pl.DataFrame:
     return df
 
 
+def _lorentz_mass(df: pl.DataFrame) -> pl.DataFrame:
+    """Compute invariant mass from E1/E2/px1/px2/py1/py2/pz1/pz2 columns."""
+    return df.with_columns(
+        ((pl.col('E1') + pl.col('E2'))**2 - (
+            (pl.col('px1') + pl.col('px2'))**2 +
+            (pl.col('py1') + pl.col('py2'))**2 +
+            (pl.col('pz1') + pl.col('pz2'))**2
+        )).clip(lower_bound=0).sqrt().alias('Calculated_M')
+    )
+
+
 def _compute_invariant_mass(df: pl.DataFrame, cols: list[str]) -> pl.DataFrame:
     if 'E1' in cols and 'px1' in cols:
-        df = df.with_columns([
-            (pl.col('E1') + pl.col('E2')).alias('E_tot'),
-            (pl.col('px1') + pl.col('px2')).alias('px_tot'),
-            (pl.col('py1') + pl.col('py2')).alias('py_tot'),
-            (pl.col('pz1') + pl.col('pz2')).alias('pz_tot'),
-        ])
-        df = df.with_columns(
-            ((pl.col('E_tot')**2 - (pl.col('px_tot')**2 + pl.col('py_tot')**2 + pl.col('pz_tot')**2)).clip(lower_bound=0).sqrt()).alias('Calculated_M')
-        )
+        df = _lorentz_mass(df)
 
     elif 'pt1' in cols and 'eta1' in cols:
-        m_mu = 0.105658
         df = df.with_columns([
             (pl.col('pt1') * pl.col('phi1').cos()).alias('px1'),
             (pl.col('pt1') * pl.col('phi1').sin()).alias('py1'),
             (pl.col('pt1') * pl.col('eta1').sinh()).alias('pz1'),
-        ])
-        df = df.with_columns(
-            ((pl.col('px1')**2 + pl.col('py1')**2 + pl.col('pz1')**2 + m_mu**2).sqrt()).alias('E1')
-        )
-        df = df.with_columns([
             (pl.col('pt2') * pl.col('phi2').cos()).alias('px2'),
             (pl.col('pt2') * pl.col('phi2').sin()).alias('py2'),
             (pl.col('pt2') * pl.col('eta2').sinh()).alias('pz2'),
         ])
-        df = df.with_columns(
-            ((pl.col('px2')**2 + pl.col('py2')**2 + pl.col('pz2')**2 + m_mu**2).sqrt()).alias('E2')
-        )
         df = df.with_columns([
-            (pl.col('E1') + pl.col('E2')).alias('E_tot'),
-            (pl.col('px1') + pl.col('px2')).alias('px_tot'),
-            (pl.col('py1') + pl.col('py2')).alias('py_tot'),
-            (pl.col('pz1') + pl.col('pz2')).alias('pz_tot'),
+            ((pl.col('px1')**2 + pl.col('py1')**2 + pl.col('pz1')**2 + _MUON_MASS_GEV**2).sqrt()).alias('E1'),
+            ((pl.col('px2')**2 + pl.col('py2')**2 + pl.col('pz2')**2 + _MUON_MASS_GEV**2).sqrt()).alias('E2'),
         ])
-        df = df.with_columns(
-            ((pl.col('E_tot')**2 - (pl.col('px_tot')**2 + pl.col('py_tot')**2 + pl.col('pz_tot')**2)).clip(lower_bound=0).sqrt()).alias('Calculated_M')
-        )
+        df = _lorentz_mass(df)
 
     elif 'pt' in cols and 'MET' in cols:
         st.info("💡 **Format Detected:** Single-particle event with Missing Transverse Energy (MET). Calculating **Transverse Mass ($M_T$)**.")

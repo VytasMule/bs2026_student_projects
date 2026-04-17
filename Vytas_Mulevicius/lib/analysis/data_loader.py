@@ -100,10 +100,10 @@ def _download_with_progress(url: str) -> str:
                 downloaded += len(chunk)
                 dl_bar.progress(min(downloaded / total, 1.0) if total else 0.0)
                 dl_status.metric("Downloaded", _format_mb(downloaded))
-    except Exception:
+    except Exception as exc:
         tmp.close()
         os.unlink(tmp.name)
-        raise
+        raise exc
 
     tmp.close()
     if total and downloaded < total:
