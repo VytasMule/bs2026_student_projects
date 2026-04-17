@@ -35,6 +35,16 @@ def load_data(path: str) -> pl.DataFrame:
         return pl.read_csv(path)
 
     if path.lower().split('?')[0].endswith('.root') or path.startswith('root://'):
+        if path.startswith('root://'):
+            st.error(
+                "⚠️ **XRootD streaming is not available** — the `fsspec-xrootd` package is not "
+                "installed in this environment.\n\n"
+                "**What to do:** Go to the **CERN Explorer** page, find this file, and click "
+                "**🌊 Stream** to load it over HTTP instead."
+            )
+            st.stop()
+            return pl.DataFrame()
+
         import uproot
         import awkward as ak
         with uproot.open(path) as f:

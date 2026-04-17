@@ -1,5 +1,5 @@
 import streamlit as st
-from lib.ui_utils import apply_branding
+from lib.ui_utils import apply_branding, render_sidebar_footer
 from lib.exploration.cern_api import get_cern_data, QUICK_PICKS
 from lib.exploration.file_renderer import render_csv_files, render_root_files
 
@@ -19,6 +19,8 @@ if 'active_preview_id' not in st.session_state:
     st.session_state.active_preview_id = None
 if 'nav_to_analysis' not in st.session_state:
     st.session_state.nav_to_analysis = False
+if 'expanded_rec_id' not in st.session_state:
+    st.session_state.expanded_rec_id = None
 
 if st.session_state.nav_to_analysis:
     st.session_state.nav_to_analysis = False
@@ -44,6 +46,10 @@ for i, (label, query) in enumerate(QUICK_PICKS.items()):
 
 # --- Results ---
 if st.session_state.search_query:
+    if st.session_state.get('_last_query') != (st.session_state.search_query, only_csv):
+        st.session_state.expanded_rec_id = None
+        st.session_state._last_query = (st.session_state.search_query, only_csv)
+
     with st.spinner("Querying CERN Open Data API..."):
         result_data = get_cern_data(st.session_state.search_query, only_csv)
 
@@ -59,9 +65,10 @@ if st.session_state.search_query:
                 metadata = hit.get('metadata', {})
                 title = metadata.get('title', 'Unknown Title')
                 rec_id = hit.get('id')
-                is_active = st.session_state.active_preview_id == rec_id
+                is_preview_active = st.session_state.active_preview_id == rec_id
+                show_files = is_preview_active or (st.session_state.expanded_rec_id == rec_id)
 
-                with st.expander(f"📚 {title} (ID: {rec_id})", expanded=is_active):
+                with st.expander(f"📚 {title} (ID: {rec_id})", expanded=show_files):
                     m1, m2, m3, m4 = st.columns(4)
                     with m1:
                         st.metric("Experiment", ", ".join(metadata.get('experiment', ['N/A'])))
@@ -85,13 +92,31 @@ if st.session_state.search_query:
                     compatible = [f for f in files if f.get('key', '').lower().endswith(('.csv', '.txt', '.json'))]
                     root_files = [f for f in files if f.get('key', '').lower().endswith('.root')]
 
-                    if compatible:
-                        render_csv_files(compatible, rec_id, is_active)
-                    if root_files:
-                        render_root_files(root_files, rec_id)
-                    if not compatible and not root_files:
-                        formats = metadata.get('distribution', {}).get('formats', [])
-                        fmt = ", ".join(formats).upper() if formats else "ROOT/DST"
-                        st.warning(f"⚠️ This dataset uses **{fmt}** format, which is not supported for direct browser preview.")
+                    if show_files:
+                        if compatible:
+                            render_csv_files(compatible, rec_id, is_preview_active)
+                        if root_files:
+                            render_root_files(root_files, rec_id)
+                        if not compatible and not root_files:
+                            formats = metadata.get('distribution', {}).get('formats', [])
+                            fmt = ", ".join(formats).upper() if formats else "ROOT/DST"
+                            st.warning(f"⚠️ This dataset uses **{fmt}** format, which is not supported for direct browser preview.")
+                    else:
+                        parts = []
+                        if compatible:
+                            parts.append(f"{len(compatible)} CSV")
+                        if root_files:
+                            parts.append(f"{len(root_files)} ROOT")
+                        label = f"📂 Show files ({', '.join(parts)})" if parts else "⚠️ No data files"
+                        if parts:
+                            st.button(
+                                label,
+                                key=f"show_{rec_id}",
+                                on_click=lambda r=rec_id: st.session_state.update(expanded_rec_id=r),
+                            )
+                        else:
+                            st.caption(label)
 
 st.info("💡 **Navigation:** Use the sidebar on the left to head back to the 'Analysis' module with your own local data.")
+
+render_sidebar_footer()

@@ -1,7 +1,7 @@
 import streamlit as st
 import os
 from lib.download_data import get_datasets, download_dataset
-from lib.ui_utils import apply_branding
+from lib.ui_utils import apply_branding, render_sidebar_footer
 from lib.exploration.inspect_root import get_root_structure, get_branch_details
 from lib.analysis.dataset_metadata import get_metadata, build_file_options
 from lib.analysis.data_loader import load_data, stream_root_data
@@ -150,3 +150,5 @@ st.subheader("Raw data preview")
 preview_df = df.head(100).to_pandas()
 preview_df.columns = [str(c) for c in preview_df.columns]
 st.dataframe(preview_df)
+
+render_sidebar_footer()
