@@ -14,22 +14,23 @@
 ## 🚀 Key Features
 
 *   **⚡ High-Performance Analysis**: Leveraging [Polars](https://pola.rs/) for lightning-fast columnar processing of millions of collision events.
-*   **🌐 Real-time CERN Portal Integration**: Search and stream datasets directly from the `opendata.cern.ch` API.
+*   **🌐 Real-time CERN Portal Integration**: Search and stream datasets directly from the `opendata.cern.ch` API with integrated metadata peeking.
 *   **📊 Publication-Quality Graphics**: Integrated Matplotlib engine for generating high-DPI (300) histograms suitable for scientific publication.
 *   **🧊 3D Event Visualization**: Native browser-based 3D momentum vector displays and event-by-event animations using Plotly.
 *   **🕵️ Deep ROOT/DST Inspection**: Advanced diagnostic tools to peer into the nested structure of complex High Energy Physics (HEP) objects via [Uproot](https://uproot.readthedocs.io/).
 *   **📝 LHCb Macro Generator**: Automated generation of DaVinci/Gaudi configuration code for CERN GRID processing.
+*   **✅ Modular Architecture**: Decoupled physics logic, plotting engines, and UI utilities for maximum maintainability and testability.
 
 ---
 
 ## 🛠️ Technology Stack
 
 | Component | Technology |
-| :--- | :--- |
 | **Frontend/Dashboard** | [Streamlit](https://streamlit.io/) |
 | **Data Processing** | [Polars](https://pola.rs/), [NumPy](https://numpy.org/), [Awkward Array](https://awkward-array.org/) |
 | **HEP Integration** | [Uproot 5](https://uproot.readthedocs.io/), XRootD |
 | **Visualization** | [Plotly](https://plotly.com/), [Matplotlib](https://matplotlib.org/) |
+| **Validation & Testing** | [Pytest](https://pytest.org/), [Pydantic](https://docs.pydantic.dev/) |
 | **Package Management** | [Pixi](https://pixi.sh/) |
 
 ---
@@ -59,21 +60,39 @@ pixi run streamlit run main.py
 
 ---
 
+## 🧪 Testing & Quality Assurance
+
+This project maintains high scientific reliability through a robust automated testing suite.
+
+### Running Tests
+Execute the full test suite using Pixi:
+
+```bash
+pixi run pytest
+```
+
+The suite covers:
+*   **Unit Tests**: Validation of kinematic filters, column mapping, and CERN API interactions.
+*   **Data Validation**: Schema enforcement and data loading stability using Pydantic.
+*   **E2E Tests**: Full pipeline verification from data acquisition to physics visualization.
+
+---
+
 ## 📂 Project Structure
 
 ```text
 .
 ├── assets/             # Brand assets and images
 ├── data/               # Local cache for CERN datasets
+├── lib/                # Core physics library (modular package)
+│   ├── analysis/       # Physics calculations & plotting logic
+│   ├── exploration/    # CERN API bridge & ROOT utilities
+│   └── ui_utils.py     # Enterprise branding & UI components
 ├── pages/              # Streamlit dashboard modules
-│   ├── 1_Analysis.py      # Core physics analysis engine
-│   ├── 2_CernExplorer.py  # Portal search & streaming
-│   └── 3_Macro_Generator.py # LHCb DaVinci code generation
-├── scripts/            # Modular research tools
-│   ├── analysis/          # Scientific plotting modules
-│   ├── exploration/       # ROOT/DST deep inspection
-│   └── davinci_macros/    # Gaudi/DaVinci templates
-└── main.py             # Application entry point
+├── tests/              # Comprehensive automated test suite
+├── main.py             # Application entry point
+├── pixi.toml           # Environment & dependency management
+└── pytest.ini          # Testing configuration
 ```
 
 ---
@@ -84,7 +103,7 @@ The analysis logic follows standard HEP workflows for Dimuon resonance reconstru
 
 $$M = \sqrt{(E_1+E_2)^2 - \|\vec{p}_1 + \vec{p}_2\|^2}$$
 
-Validation against PDG (Particle Data Group) values is integrated into the "Publication Export" module.
+Validation against PDG (Particle Data Group) values is integrated into the automated testing pipeline and the "Publication Export" module.
 
 ## 👨‍🔬 Author
 
@@ -105,7 +124,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## 🙏 Acknowledgments
 
 *   **CERN Open Data Group** for providing authentic LHC collision data.
-*   **Scikit-HEP** developers for the amazing tools like Uproot and Awkward Array.
+*   **Scikit-HEP** developers for tools like Uproot and Awkward Array.
 *   Academic institutions for supporting Open Science.
 
 ---
