@@ -199,12 +199,33 @@ def _compute_invariant_mass(df: pl.DataFrame, cols: list[str]) -> pl.DataFrame:
         df = df.with_columns(
             ((2 * pl.col('pt') * pl.col('MET') * (1 - (pl.col('phi') - pl.col('phiMET')).cos())).sqrt()).alias('Calculated_M')
         )
+        # Standardize cartesian coordinates for 3D visualization
+        df = df.with_columns([
+            (pl.col('pt') * pl.col('phi').cos()).alias('px'),
+            (pl.col('pt') * pl.col('phi').sin()).alias('py'),
+            (pl.col('MET') * pl.col('phiMET').cos()).alias('pxMET'),
+            (pl.col('MET') * pl.col('phiMET').sin()).alias('pyMET'),
+        ])
+        if 'eta' in cols:
+            df = df.with_columns((pl.col('pt') * pl.col('eta').sinh()).alias('pz'))
+        else:
+            df = df.with_columns(pl.lit(0.0).alias('pz'))
 
     elif 'M' in cols:
         df = df.with_columns(pl.col('M').alias('Calculated_M'))
 
     else:
-        st.error(f"Dataset columns {df.columns} are not recognized for invariant mass calculation.")
+        # Check if this looks like a RAW dataset (mostly framework/HLT branches)
+        is_raw = any('HLT' in c or 'source' in c or 'edm' in c for c in df.columns)
+        if is_raw:
+            st.error("⚠️ **RAW Dataset Detected:** This file contains low-level detector signals rather than physics objects (Muons/Electrons).")
+            st.info(
+                "**Recommendation:** RAW data is not directly usable for invariant mass analysis. "
+                "Please search the **CERN Explorer** for the **AOD** or **MINIAOD** version of this dataset, "
+                "which contains the reconstructed leptons you need."
+            )
+        else:
+            st.error(f"Dataset columns {df.columns} are not recognized for invariant mass calculation.")
         st.stop()
 
     return df

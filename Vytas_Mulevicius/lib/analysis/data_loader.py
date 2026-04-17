@@ -31,10 +31,13 @@ def load_data(path: str) -> pl.DataFrame:
     'Events', 'DecayTree', 'mini', or 'tree' is selected, then converted to Polars
     via Arrow. Calls st.stop() on unrecognized formats.
     """
-    if path.lower().split('?')[0].endswith('.csv'):
+    is_csv = path.lower().split('?')[0].endswith('.csv')
+    if is_csv:
         return pl.read_csv(path)
 
-    if path.lower().split('?')[0].endswith('.root') or path.startswith('root://'):
+    # Heuristic: check for standard extension or CERN indexed storage pattern
+    is_cern_files_proxy = 'opendata.cern.ch/record/' in path and '/files/' in path
+    if path.lower().split('?')[0].endswith('.root') or path.startswith('root://') or (is_cern_files_proxy and not is_csv):
         if path.startswith('root://'):
             st.error(
                 "⚠️ **XRootD streaming is not available** — the `fsspec-xrootd` package is not "
@@ -153,9 +156,13 @@ def _iterate_with_preview(local_path: str) -> pl.DataFrame:
             try:
                 if branch.num_entries != total:
                     return False
+                # 1. Check if awkward can even form the type
                 branch.interpretation.awkward_form(branch.file)
+                # 2. Test read the first entry to catch DeserializationErrors (common in RAW/RECO frameworks)
+                branch.array(entry_start=0, entry_stop=1, library="ak")
                 return True
-            except Exception:
+            except (Exception, uproot.deserialization.DeserializationError):
+                # Omit branches that cannot be deserialized safely in a Python environment
                 return False
 
         chunks = []
