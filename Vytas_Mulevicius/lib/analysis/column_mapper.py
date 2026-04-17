@@ -17,6 +17,10 @@ def map_columns(df: pl.DataFrame) -> pl.DataFrame:
         df = _map_atlas(df, cols)
         cols = df.columns
 
+    if ('Muon_Px' in cols and 'NMuon' in cols) or ('Electron_Px' in cols and 'NElectron' in cols):
+        df = _map_cms(df, cols)
+        cols = df.columns
+
     if 'Calculated_M' not in df.columns:
         df = _compute_invariant_mass(df, cols)
 
@@ -110,6 +114,52 @@ def _map_atlas(df: pl.DataFrame, cols: list[str]) -> pl.DataFrame:
                 pl.col('lep_charge').list.get(1).alias('Q2'),
             ])
         df = df.drop_nulls(subset=['pt1', 'pt2'])
+    return df
+
+
+def _map_cms(df: pl.DataFrame, cols: list[str]) -> pl.DataFrame:
+    """
+    CMS format: NMuon/NElectron scalars + Muon_Px/Py/Pz/E and Electron_Px/Py/Pz/E
+    as variable-length List columns (units: GeV). Prefers dimuon if ≥ 2 muons
+    exist in any event, otherwise falls back to dielectron.
+    """
+    with st.spinner("Extracting CMS leptons..."):
+        has_dimuon = 'Muon_Px' in cols and df.filter(pl.col('NMuon') >= 2).height > 0
+        has_dielectron = 'Electron_Px' in cols and df.filter(pl.col('NElectron') >= 2).height > 0
+
+        if has_dimuon:
+            lepton = 'Muon'
+            count_col = 'NMuon'
+        elif has_dielectron:
+            lepton = 'Electron'
+            count_col = 'NElectron'
+        else:
+            st.warning("⚠️ No events with ≥ 2 muons or electrons found in this CMS dataset.")
+            st.stop()
+            return df
+
+        n_before = len(df)
+        df = df.filter(pl.col(count_col) >= 2)
+        n_after = len(df)
+        if n_after < n_before:
+            st.info(f"ℹ️ Kept {n_after:,} {lepton.lower()} events (dropped {n_before - n_after:,} with < 2).")
+
+        df = df.with_columns([
+            pl.col(f'{lepton}_Px').list.get(0).alias('px1'),
+            pl.col(f'{lepton}_Py').list.get(0).alias('py1'),
+            pl.col(f'{lepton}_Pz').list.get(0).alias('pz1'),
+            pl.col(f'{lepton}_E').list.get(0).alias('E1'),
+            pl.col(f'{lepton}_Px').list.get(1).alias('px2'),
+            pl.col(f'{lepton}_Py').list.get(1).alias('py2'),
+            pl.col(f'{lepton}_Pz').list.get(1).alias('pz2'),
+            pl.col(f'{lepton}_E').list.get(1).alias('E2'),
+        ])
+        charge_col = f'{lepton}_Charge'
+        if charge_col in cols:
+            df = df.with_columns([
+                pl.col(charge_col).list.get(0).alias('Q1'),
+                pl.col(charge_col).list.get(1).alias('Q2'),
+            ])
     return df
 
 

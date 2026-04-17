@@ -134,9 +134,23 @@ def _iterate_with_preview(local_path: str) -> pl.DataFrame:
             iter_status = st.empty()
         preview = st.empty()
 
+        # Filter out branches that cannot be read as awkward arrays at iterate time.
+        # Two classes of problematic branches exist in real CERN files:
+        #  1. Empty/bookkeeping branches (num_entries != total) — cause length-mismatch ValueError
+        #  2. Object branches (TObjArray etc.) that awkward cannot represent — CannotBeAwkward
+        # Using filter_branch ensures the check runs for friend-tree branches too.
+        def _branch_ok(branch):
+            try:
+                if branch.num_entries != total:
+                    return False
+                branch.interpretation.awkward_form(branch.file)
+                return True
+            except Exception:
+                return False
+
         chunks = []
         loaded = 0
-        for chunk in tree.iterate(step_size=10_000, library="ak"):
+        for chunk in tree.iterate(filter_branch=_branch_ok, step_size=10_000, library="ak"):
             chunk_df = pl.from_arrow(ak.to_arrow_table(chunk, extensionarray=False))
             chunks.append(chunk_df)
             loaded += len(chunk_df)
@@ -147,5 +161,14 @@ def _iterate_with_preview(local_path: str) -> pl.DataFrame:
         iter_bar.empty()
         iter_status.empty()
         preview.empty()
+
+    if not chunks:
+        st.error(
+            "⚠️ No data could be read from this ROOT tree — all branches use "
+            "unsupported complex object types (e.g. TObjArray). "
+            "Try a different file or tree."
+        )
+        st.stop()
+        return pl.DataFrame()
 
     return pl.concat(chunks)
