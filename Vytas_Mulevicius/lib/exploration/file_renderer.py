@@ -87,6 +87,7 @@ def _handle_preview(rec_id: str | int, fname: str, furl: str) -> None:
 
 def _stream_to_analysis(url: str) -> None:
     st.session_state.stream_url = url
+    st.session_state.data_source = "Remote Stream (XRootD/HTTP)"
     st.session_state.nav_to_analysis = True
 
 

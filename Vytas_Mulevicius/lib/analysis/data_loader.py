@@ -1,8 +1,27 @@
+import os
+import tempfile
+import urllib.request
 import streamlit as st
 import polars as pl
 
+_TREE_NAMES = ('Events', 'DecayTree', 'mini', 'tree')
+_DOWNLOAD_CHUNK = 1024 * 1024  # 1 MB per read
+_WARN_SIZE_BYTES = 500 * 1024 * 1024  # warn above 500 MB
 
-@st.cache_data
+
+def _find_tree(f):
+    all_trees = [k for k, v in f.items(recursive=True) if hasattr(v, "arrays")]
+    if not all_trees:
+        st.error("No TTree found in file.")
+        st.stop()
+    return next((k for k in all_trees if any(p in k for p in _TREE_NAMES)), all_trees[0])
+
+
+def _format_mb(n_bytes: int) -> str:
+    return f"{n_bytes / 1_048_576:.1f} MB"
+
+
+@st.cache_data(show_spinner=False)
 def load_data(path: str) -> pl.DataFrame:
     """
     Loads a CSV or ROOT file into a Polars DataFrame.
@@ -19,19 +38,114 @@ def load_data(path: str) -> pl.DataFrame:
         import uproot
         import awkward as ak
         with uproot.open(path) as f:
-            all_trees = [k for k, v in f.items(recursive=True) if hasattr(v, "arrays")]
-            if not all_trees:
-                st.error(f"No TTree found in {path}")
-                st.stop()
-            tree_name = next(
-                (k for k in all_trees if any(p in k for p in ('Events', 'DecayTree', 'mini', 'tree'))),
-                all_trees[0]
-            )
+            tree_name = _find_tree(f)
             st.info(f"📍 Loading tree: `{tree_name}`")
-            tree = f[tree_name]
-            ak_array = tree.arrays()
-            arrow_table = ak.to_arrow_table(ak_array, extensionarray=False)
-            return pl.from_arrow(arrow_table)
+            ak_array = f[tree_name].arrays()
+            return pl.from_arrow(ak.to_arrow_table(ak_array, extensionarray=False))
 
     st.error(f"Unsupported file format: {path}")
     st.stop()
+
+
+def stream_root_data(path: str) -> pl.DataFrame:
+    """
+    Streams a remote ROOT file, showing two-phase live progress:
+      1. Download phase — progress bar + MB counter as bytes arrive.
+      2. Iterate phase — 10k-event chunks with a rolling data preview.
+
+    Many CERN ROOT files have inconsistent fEND/fNbytesKeys headers that prevent
+    uproot from reading the directory structure over HTTP. Downloading to a temp
+    file first avoids this; uproot then reads a local file whose size is correct.
+    Results are NOT cached — callers should store in st.session_state.
+    """
+    import uproot
+    import awkward as ak
+
+    tmp_path = None
+    try:
+        tmp_path = _download_with_progress(path)
+        return _iterate_with_preview(tmp_path)
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+
+
+def _download_with_progress(url: str) -> str:
+    req_head = urllib.request.Request(url, method='HEAD', headers={'User-Agent': 'Mozilla/5.0'})
+    with urllib.request.urlopen(req_head) as head:
+        total = int(head.headers.get('Content-Length', 0))
+
+    if total and total > _WARN_SIZE_BYTES:
+        st.warning(
+            f"⚠️ Large file: **{_format_mb(total)}** — download may take several minutes. "
+            "Consider using a smaller sample if available."
+        )
+    st.info(f"📥 Downloading {'(' + _format_mb(total) + ')' if total else ''}...")
+    col_prog, col_stat = st.columns([3, 1])
+    with col_prog:
+        dl_bar = st.progress(0.0)
+    with col_stat:
+        dl_status = st.empty()
+
+    tmp = tempfile.NamedTemporaryFile(suffix='.root', delete=False)
+    try:
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req) as resp:
+            downloaded = 0
+            while True:
+                chunk = resp.read(_DOWNLOAD_CHUNK)
+                if not chunk:
+                    break
+                tmp.write(chunk)
+                downloaded += len(chunk)
+                dl_bar.progress(min(downloaded / total, 1.0) if total else 0.0)
+                dl_status.metric("Downloaded", _format_mb(downloaded))
+    except Exception:
+        tmp.close()
+        os.unlink(tmp.name)
+        raise
+
+    tmp.close()
+    if total and downloaded < total:
+        os.unlink(tmp.name)
+        raise OSError(
+            f"Download incomplete: received {_format_mb(downloaded)} of {_format_mb(total)}. "
+            "The connection may have been reset. Try again or use a smaller file."
+        )
+    dl_bar.empty()
+    dl_status.empty()
+    return tmp.name
+
+
+def _iterate_with_preview(local_path: str) -> pl.DataFrame:
+    import uproot
+    import awkward as ak
+
+    with uproot.open(local_path) as f:
+        tree_name = _find_tree(f)
+        tree = f[tree_name]
+        total = tree.num_entries
+
+        st.info(f"📍 Processing tree: `{tree_name}` — {total:,} total events")
+        col_prog, col_stat = st.columns([3, 1])
+        with col_prog:
+            iter_bar = st.progress(0.0)
+        with col_stat:
+            iter_status = st.empty()
+        preview = st.empty()
+
+        chunks = []
+        loaded = 0
+        for chunk in tree.iterate(step_size=10_000, library="ak"):
+            chunk_df = pl.from_arrow(ak.to_arrow_table(chunk, extensionarray=False))
+            chunks.append(chunk_df)
+            loaded += len(chunk_df)
+            iter_bar.progress(min(loaded / total, 1.0))
+            iter_status.metric("Events", f"{loaded:,}")
+            preview.dataframe(chunk_df.head(5).to_pandas(), use_container_width=True)
+
+        iter_bar.empty()
+        iter_status.empty()
+        preview.empty()
+
+    return pl.concat(chunks)

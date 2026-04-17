@@ -21,7 +21,7 @@ QUICK_PICKS = {
 }
 
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=3600, show_spinner=False)
 def get_cern_data(query: str, only_csv: bool = True) -> dict[str, Any]:
     """
     Queries the CERN Open Data REST API and returns the parsed JSON response.

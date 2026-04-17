@@ -74,6 +74,18 @@ def _map_lhcb(df: pl.DataFrame, cols: list[str]) -> pl.DataFrame:
 
 def _map_atlas(df: pl.DataFrame, cols: list[str]) -> pl.DataFrame:
     with st.spinner("Extracting ATLAS leptons and converting MeV -> GeV..."):
+        n_before = len(df)
+        df = df.filter(pl.col('lep_pt').list.len() >= 2)
+        n_after = len(df)
+        if n_after == 0:
+            st.warning(
+                f"⚠️ **Single-lepton dataset detected:** all {n_before:,} events have fewer than 2 leptons. "
+                "This file is likely a 1-lepton channel sample (e.g. W+jets) and cannot be used for "
+                "di-lepton invariant mass analysis. Try a **2lep** dataset instead."
+            )
+            st.stop()
+        elif n_after < n_before:
+            st.info(f"ℹ️ Dropped {n_before - n_after:,} events with < 2 leptons ({n_after:,} remain).")
         df = df.with_columns([
             (pl.col('lep_pt').list.get(0) / 1000.0).alias('pt1'),
             (pl.col('lep_pt').list.get(1) / 1000.0).alias('pt2'),

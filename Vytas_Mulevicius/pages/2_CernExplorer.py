@@ -44,7 +44,8 @@ for i, (label, query) in enumerate(QUICK_PICKS.items()):
 
 # --- Results ---
 if st.session_state.search_query:
-    result_data = get_cern_data(st.session_state.search_query, only_csv)
+    with st.spinner("Querying CERN Open Data API..."):
+        result_data = get_cern_data(st.session_state.search_query, only_csv)
 
     if "error" in result_data:
         st.error(f"Error querying CERN API: {result_data['error']}")

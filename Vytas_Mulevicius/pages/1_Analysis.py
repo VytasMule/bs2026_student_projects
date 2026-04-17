@@ -4,7 +4,7 @@ from lib.download_data import get_datasets, download_dataset
 from lib.ui_utils import apply_branding
 from lib.exploration.inspect_root import get_root_structure, get_branch_details
 from lib.analysis.dataset_metadata import get_metadata, build_file_options
-from lib.analysis.data_loader import load_data
+from lib.analysis.data_loader import load_data, stream_root_data
 from lib.analysis.column_mapper import map_columns
 from lib.analysis.filters import apply_kinematic_filters
 from lib.analysis.plots.mass_histogram import render_mass_histogram
@@ -20,7 +20,7 @@ if not os.path.exists('data'):
     os.makedirs('data', exist_ok=True)
 
 available_files = sorted([f for f in os.listdir('data') if f.endswith(('.csv', '.root'))])
-data_source = st.sidebar.radio("Data Source", ["Local Storage", "Remote Stream (XRootD/HTTP)"])
+data_source = st.sidebar.radio("Data Source", ["Local Storage", "Remote Stream (XRootD/HTTP)"], key="data_source")
 
 if data_source == "Local Storage":
     if not available_files:
@@ -66,9 +66,18 @@ if data_source == "Local Storage":
         st.stop()
 
 # --- Load Data ---
-with st.spinner(f"Loading {selected_file}..."):
-    path_to_load = f"data/{selected_file}" if data_source == "Local Storage" else selected_file
-    df = load_data(path_to_load)
+path_to_load = f"data/{selected_file}" if data_source == "Local Storage" else selected_file
+is_http_root = path_to_load.startswith("http") and path_to_load.lower().split('?')[0].endswith('.root')
+
+if is_http_root:
+    cache_key = f"streamed_{path_to_load}"
+    if cache_key not in st.session_state:
+        st.subheader("📡 Live Stream")
+        st.session_state[cache_key] = stream_root_data(path_to_load)
+    df = st.session_state[cache_key]
+else:
+    with st.spinner(f"Loading {selected_file}..."):
+        df = load_data(path_to_load)
 
 with st.expander("🔍 Raw Data Diagnostic Inspect"):
     st.write(f"Total Events: {len(df)}")
