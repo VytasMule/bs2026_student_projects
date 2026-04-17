@@ -1,0 +1,9 @@
+Total races (rows): 1142
+Years covered: 1950–2025
+Unique winners: 115
+Unique teams: 65
+
+Top winner: Lewis Hamilton (105 wins)
+Top team: Ferrari (249 wins)
+Most common Grand Prix: Italy (82 races)
+Most common circuit: Autodromo Nazionale di Monza (75 races)
