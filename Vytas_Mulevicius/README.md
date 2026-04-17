@@ -76,6 +76,21 @@ The suite covers:
 *   **Data Validation**: Schema enforcement and data loading stability using Pydantic.
 *   **E2E Tests**: Full pipeline verification from data acquisition to physics visualization.
 
+### 📊 Test Coverage
+
+The project maintains high code quality through a comprehensive test suite of **102 tests**:
+
+| Component | Test Focus | Coverage |
+| :--- | :--- | :--- |
+| **Physics Analysis** | Kinematic filters, Dimuon resonance matching | High |
+| **CERN API Bridge** | Record searching, Pagination, Error handling | High |
+| **Data Engine** | Schema enforcement, Polars/Pandas loading | Medium-High |
+| **Visualization** | Histogram generation, 3D vector calculation | Medium |
+| **Integration** | End-to-end pipeline (Mocked & Real API) | High |
+
+> [!NOTE]
+> All 83/83 local unit tests pass in ~6 seconds. Integration tests requiring network access may take longer depending on CERN server availability.
+
 ---
 
 ## 📂 Project Structure
@@ -94,6 +109,18 @@ The suite covers:
 ├── pixi.toml           # Environment & dependency management
 └── pytest.ini          # Testing configuration
 ```
+
+---
+
+## ⚠️ Use Cases & Known Limitations
+
+While robust, users should be aware of the following technical constraints:
+
+*   **🌐 Network Latency**: Real-time streaming from `opendata.cern.ch` is subject to CERN's server status. If a dataset is unresponsive, try **📥 Fetching** the file for local processing.
+*   **🧊 ROOT Header Fragmentation**: High-complexity ROOT files with deeply nested structures may fail the initial "Peek" due to HTTP byte-range fragmentation. In these cases, use **🌊 Stream** or **📥 Fetch**.
+*   **🧠 Memory Management**: Processing CSVs with over 10M events may exceed browser/server memory limits in Streamlit. Use the "Sampling" or "Filter" features to reduce data volume before visualization.
+*   **🎯 Identification Heuristics**: Particle identification relies on rigid PDG mass tolerances. Overlapping peaks (e.g., $J/\psi$ and $\psi(2S)$ in low-res datasets) may require manual histogram binning adjustments.
+*   **⚛️ XRootD Availability**: High-speed XRootD streaming requires specific network ports to be open. If XRootD fails, fallback to standard HTTP streaming is automatic.
 
 ---
 
